@@ -1,167 +1,212 @@
-# Portal de Autofacturación (CFDI 4.0) – Diagrama de Flujo Detallado
+# Diagrama de flujo del portal de autofacturacion
 
-Este documento muestra el flujo end-to-end para que un cliente final emita su factura electrónica a partir de un ticket de venta, incluyendo validaciones fiscales, seguridad, antifraude, manejo de errores, y post-emisión.
+A continuación se presentan diagramas Mermaid compatibles con GitHub. No hay comillas ni parentesis en labels. Cada subflujo cubre escenarios clave.
 
-Leyenda de actores:
-- Cliente: Navegador del usuario final
-- Portal: Frontend + Backend del portal de autofacturación
-- POS/ERP: Sistemas internos donde reside la venta/ticket
-- PAC: Proveedor Autorizado de Certificación
-- Email/CDN/Storage: Entrega de archivos y correos
-
-## Flujo principal: emisión de CFDI por ticket
+## Flujo principal desde ticket hasta entrega
 
 ```mermaid
 flowchart TD
-  %% Subgraphs (actores)
-  subgraph A[Cliente]
-    A0[Abre URL del Portal] --> A1[Lee Aviso de Privacidad<br/>y Términos]
-    A1 --> A2[Ingresa identificadores del ticket<br/>- No. Ticket (o QR token)<br/>- Fecha compra<br/>- Total exacto<br/>- Sucursal]
+  %% Secciones
+  subgraph Cliente
+    A1[Accede al portal]
+    A2[Ingresa ticket numero fecha total sucursal o QR]
+    A3[Captura datos fiscales RFC nombre regimen CP usoCFDI email]
+    A4[Confirma y acepta privacidad y terminos]
   end
 
-  subgraph B[Portal (Edge)]
-    B0[WAF/CDN y TLS] --> B1[Anti-bot: reCAPTCHA/hCaptcha v3<br/>Rate limiting IP/huella]
+  subgraph Frontend
+    F1[Render wizard y activar captcha invisible]
+    F2[Enviar lookup con captchaToken]
+    F3[Validar RFC CP y combinaciones basicas]
+    F4[Solicitar previsualizacion]
+    F5[Mostrar resumen de conceptos impuestos y total]
+    F6[Generar Idempotency Key]
+    F7[Llamar emision issue con ticketRef receptor y email]
+    F8[Mostrar exito con UUID y links firmados de XML y PDF]
+    F9[Mostrar error y guia de correccion]
+    F10[Desafio captcha explicito si hay abuso]
   end
 
-  subgraph C[Portal (Backend)]
-    C0[Validar formato y normalizar entrada<br/>(sanitización, trimming, locales)] --> C1[Verificar ventana de facturación<br/>(política negocio)]
-    C1 --> C2{¿Entrada vía QR firmado?}
-    C2 -- Sí --> C3[Verificar firma del token (JWT/HMAC)<br/>y claims: ticketId, total, fecha, sucursal]
-    C2 -- No --> C4[Aplicar 2FA de ticket:<br/>coinciden ticket + fecha + total + sucursal]
-    C3 --> C5[Construir consulta a POS/ERP]
-    C4 --> C5
-
-    C5 --> C6[Consulta ticket a POS/ERP]
-    C6 --> C7{¿Ticket existe?}
-    C7 -- No --> E1[Rechazo: Ticket no encontrado<br/>+ guía para revisar datos]
-    C7 -- Sí --> C8[Validar estado: no devuelto/cancelado,<br/>moneda soportada, sucursal vigente]
-    C8 --> C9{¿Ticket ya facturado?}
-    C9 -- Sí --> E2[Detener: ya facturado. Ofrecer re-descarga<br/>(validar RFC y token)]
-    C9 -- No --> C10[Validar elegibilidad:<br/>no incluido en factura global,<br/>dentro del periodo permitido]
-
-    C10 --> C11[Mapear datos de venta a CFDI:<br/>líneas, claves ProdServ/Unidad,<br/>impuestos (IVA/IEPS), descuentos]
-    C11 --> C12[Derivar forma de pago (c_FormaPago)<br/>y método (PUE/PPD) desde POS]
-    C12 --> C13[Calcular importes/impuestos<br/>con precisión 6 decimales y redondeo]
-    C13 --> C14[Preparar estado de sesión:<br/>ticket hash + intento + idempotencia]
-
-    C14 --> C15[Pedir datos fiscales del receptor<br/>(RFC, Nombre/Razón, Régimen, CP, UsoCFDI, email)]
-    C15 --> C16[Validaciones locales:<br/>formato RFC/dígito, CP válido,<br/>catálogos SAT vigentes]
-    C16 --> C17[Validar combinatorias:<br/>Régimen vs UsoCFDI]
-    C17 --> C18{¿Datos válidos?}
-    C18 -- No --> E3[Errores de captura: marcar campos,<br/>sugerir corrección y reintentar]
-    C18 -- Sí --> C19[Construir pre-CFDI 4.0 (XML en memoria)<br/>Emisor + Receptor + Conceptos + Impuestos]
-
-    C19 --> C20[Reglas de negocio:<br/>por ticket 1 factura, límites intentos,<br/>idempotencia por (ticket, RFC)]
-    C20 --> C21[Resumen para confirmación:<br/>mostrar totales, impuestos, método/forma,<br/>datos receptor, aviso privacidad]
+  subgraph Backend
+    B1[Validar ticket en POS o ERP y normalizar datos]
+    B2[Calcular previsualizacion totales impuestos metodo y forma]
+    B3[Construir XML CFDI 4.0 con conceptos y receptores]
+    B4[Firmar con CSD del emisor o usar custodia en PAC]
+    B5[Clasificar errores y mapear codigos para UI]
   end
 
-  subgraph A2[Cliente (Confirmación)]
-    A3[Confirma y acepta términos] --> A4[Solicita timbrado]
+  subgraph POS_ERP
+    P1[Buscar ticket y estado]
   end
 
-  subgraph C2[Portal (Timbrado)]
-    C22[Sellar CFDI con CSD del emisor<br/>(en HSM/Secret Manager)] --> C23[Llamar PAC: Timbrado CFDI 4.0<br/>(sandbox/prod, timeouts/retries)]
-    C23 --> C24{¿PAC responde éxito?}
-    C24 -- No --> C25[Clasificar error PAC:<br/>- Validación SAT (catálogo, RFC, totales)<br/>- Red/transitorio (retry con jitter)<br/>- Credenciales/certificado]
-    C25 --> C26{¿Error recuperable?}
-    C26 -- Sí --> C27[Reintento controlado<br/>con idempotencia y límite]
-    C27 --> C23
-    C26 -- No --> E4[Mostrar causa al usuario<br/>y pasos de corrección; registrar incidente]
-    C24 -- Sí --> C28[Guardar CFDI timbrado (XML)<br/>UUID, selloSAT, noCertSAT, fechaTimbrado]
-    C28 --> C29[Generar PDF representación impresa<br/>con QR oficial]
-    C29 --> C30[Persistir en almacenamiento cifrado<br/>(XML/PDF) + metadatos]
-    C30 --> C31[Registrar auditoría/trazas/métricas]
+  subgraph PAC
+    C1[Timbrar CFDI enviar XML]
+    C2[Responder UUID y timbre o error]
   end
 
-  subgraph D[Entrega]
-    D0[Generar enlaces firmados de descarga<br/>(expiran, one-time si aplica)] --> D1[Enviar email transaccional<br/>(XML+PDF adjuntos o links)]
-    D1 --> D2[Mostrar pantalla de éxito<br/>con links y UUID]
+  subgraph SAT
+    S1[Consulta CFDI opcional para verificacion]
   end
 
-  %% Conexiones entre subgraphs
-  A2 --> B1 --> C0
-  E1 -. respuesta a cliente .-> A2
-  E2 -. re-descarga .-> A2
-  E3 -. corrección .-> A2
-  E4 -. mostrar error .-> A2
-  A4 --> C22
-  C31 --> D0
-  D2 --> A[Fin feliz]
+  subgraph Storage
+    ST1[Guardar XML y PDF en almacenamiento seguro]
+    ST2[Generar links firmados con expiracion]
+  end
 
-  %% Notas
-  classDef error fill:#ffe6e6,stroke:#ff4d4f,color:#a8060a;
-  class E1,E2,E3,E4 error;
+  subgraph Email
+    E1[Enviar correo con links o adjuntos]
+  end
+
+  %% Flujo inicial
+  A1 --> F1
+  F1 --> A2
+  A2 --> F2
+  F2 --> B1
+  B1 --> P1
+  P1 --> B1
+
+  %% Decisiones de elegibilidad
+  B1 -->|Existe| D1{Ticket devuelto o cancelado}
+  B1 -->|No existe| X1[Error ticket no encontrado]
+  X1 --> F9
+
+  D1 -->|Si| X2[Bloqueado por devolucion o cancelacion]
+  X2 --> F9
+  D1 -->|No| D2{Ticket ya facturado}
+
+  D2 -->|Si| X3[Ofrecer redescarga de CFDI vigente]
+  X3 --> F9
+  D2 -->|No| D3{Ticket en factura global}
+
+  D3 -->|Si| X4[Bloqueado por factura global con opcion de solicitud de liberacion]
+  X4 --> F9
+  D3 -->|No| D4{Dentro de ventana permitida}
+
+  D4 -->|No| X5[Fuera de ventana mostrar mensaje y canal de soporte]
+  X5 --> F9
+  D4 -->|Si| A3
+
+  %% Captura y previsualizacion
+  A3 --> F3
+  F3 -->|Valido| F4
+  F3 -->|Invalido| F9
+  F4 --> B2
+  B2 --> F5
+  F5 --> A4
+
+  %% Emision
+  A4 --> F6
+  F6 --> F7
+  F7 --> B3
+  B3 --> B4
+  B4 --> C1
+  C1 --> C2
+
+  %% Respuesta del PAC
+  C2 -->|Exito| ST1
+  C2 -->|Error| B5
+  B5 --> F9
+
+  %% Entrega
+  ST1 --> ST2
+  ST2 --> F8
+  ST2 --> E1
+  E1 --> F8
+
+  %% Verificacion opcional
+  ST1 -.-> S1
 ```
 
-Notas clave:
-- Idempotencia: toda emisión se protege con una clave única por (ticket, RFC) para evitar duplicados.
-- Antifraude: captcha invisible y rate limiting desde el primer request; si hay patrones anómalos, elevar desafío.
-- Datos fiscales: se validan antes de timbrar para minimizar rechazos (catálogos SAT locales actualizados).
+Leyenda rapida
+- Ya facturado significa que el ticket tiene un CFDI vigente con UUID asignado
+- En factura global significa que el ticket fue incluido en un CFDI a publico en general y se bloquea la emision individual
+- Ventana permitida es el periodo definido por negocio para poder emitir la factura individual
+- Idempotency Key previene facturas duplicadas por doble clic
 
----
-
-## Flujos alternos y excepciones
-
-### A) Re-descarga segura de CFDI ya emitido
-
-```mermaid
-flowchart LR
-  R0[Cliente: "Ya facturado"] --> R1[Portal: Solicitar RFC + token de ticket o email]
-  R1 --> R2[Verificar match con CFDI emitido<br/>(ticketId, RFC, hash)]
-  R2 --> R3{¿Coincide?}
-  R3 -- No --> R4[Denegar y registrar intento]
-  R3 -- Sí --> R5[Emitir links firmados temporales<br/>para XML/PDF]
-  R5 --> R6[Email opcional de reenvío]
-```
-
-### B) Ticket incluido en factura global
-
-```mermaid
-flowchart LR
-  G0[Consulta ticket] --> G1{¿Marcado en global?}
-  G1 -- Sí --> G2[Política negocio:<br/>- Permitir cancelación parcial de global y re-facturar individual<br/>- O denegar con mensaje claro y canal de soporte]
-  G1 -- No --> G3[Continuar flujo principal]
-```
-
-### C) Cancelación y sustitución
+## Flujo de re descarga de CFDI
 
 ```mermaid
 flowchart TD
-  K0[Cliente solicita corrección] --> K1[Portal Backoffice valida motivos SAT]
-  K1 --> K2[Iniciar cancelación en PAC/SAT]
-  K2 --> K3{¿Requiere aceptación del receptor?}
-  K3 -- Sí --> K4[Esperar ventana de aceptación<br/>y notificar estatus]
-  K3 -- No --> K5[CFDI cancelado]
-  K4 --> K6{¿Aceptado?}
-  K6 -- No --> K7[Cancelar proceso y notificar]
-  K6 -- Sí --> K5
-  K5 --> K8[Si aplica, emitir CFDI sustituto<br/>(relación 04)]
-  K8 --> K9[Entregar nuevo XML/PDF y actualizar links]
+  subgraph Cliente
+    R1[Abre pagina de redescarga]
+    R2[Ingresa ticket y RFC o token de ticket]
+  end
+
+  subgraph Frontend
+    RF1[Validar formato de RFC y datos basicos]
+    RF2[Enviar solicitud de redescarga]
+    RF3[Mostrar links firmados o enviar por correo]
+    RF4[Mostrar error claro si no coincide]
+  end
+
+  subgraph Backend
+    RB1[Validar que el ticket tiene CFDI vigente]
+    RB2[Verificar coincidencia de RFC y ticket]
+  end
+
+  subgraph Storage
+    RS1[Generar nuevos links firmados con expiracion]
+  end
+
+  R1 --> R2
+  R2 --> RF1
+  RF1 -->|Valido| RF2
+  RF1 -->|Invalido| RF4
+  RF2 --> RB1
+  RB1 -->|No vigente| RF4
+  RB1 -->|Vigente| RB2
+  RB2 -->|Coincide| RS1
+  RB2 -->|No coincide| RF4
+  RS1 --> RF3
 ```
 
-### D) Errores frecuentes y manejo
+Mensajes recomendados
+- Si no coincide RFC con el CFDI vigente mostrar mensaje de seguridad sin revelar datos
+- Si el link expira permitir regenerar con validacion de ticket y RFC
 
-- RFC o nombre no coinciden con constancia: informar al usuario, permitir corrección; si PAC ofrece validador de constancia, usarlo con consentimiento.
-- Totales/impuestos no cuadran: revisar motor de impuestos del POS; bloquear emisión y alertar al equipo.
-- Certificado vencido o credenciales PAC: detener emisión, alertar on-call, conmutar a PAC secundario si existe.
-- Intermitencia PAC: reintentos exponenciales con jitter, colas diferidas; no duplicar CFDI.
+## Flujo de cancelacion y sustitucion desde backoffice
 
----
+```mermaid
+flowchart TD
+  subgraph Backoffice
+    K1[Seleccionar CFDI por UUID]
+    K2[Elegir motivo de cancelacion]
+    K3[Confirmar solicitud]
+    K4[Emitir CFDI sustituto si aplica]
+  end
 
-## Controles de seguridad y cumplimiento (puntos de inserción)
+  subgraph Backend
+    KB1[Validar estatus vigente y reglas de cancelacion]
+    KB2[Enviar solicitud de cancelacion al PAC o al SAT]
+    KB3[Actualizar estatus y acuse]
+    KB4[Relacionar CFDI 04 si hay sustitucion]
+  end
 
-- WAF/CDN: bloqueo de bots, IP reputation, reglas anti-enumeración en endpoints de ticket.
-- Captcha adaptativo: elevar desafío según riesgo (por IP/UA/huella).
-- Tokens de ticket: preferir QR con firma; expirar y ligar a monto/fecha/sucursal.
-- Secretos: CSD .cer/.key y contraseñas en HSM o Secret Manager con RBAC y rotación.
-- Logging: sin PII sensible; correlación por IDs técnicos; trazas distribuidas.
-- Descargas: URLs firmadas con expiración corta; una sola descarga si se requiere mayor control.
+  subgraph PAC
+    KC1[Procesar cancelacion]
+    KC2[Responder acuse aceptado o rechazado]
+  end
 
----
+  subgraph SAT
+    KS1[Consulta CFDI para confirmar estatus]
+  end
 
-## Métricas y observabilidad
+  K1 --> K2
+  K2 --> K3
+  K3 --> KB1
+  KB1 -->|No cancelable| XK1[Requiere aceptacion del receptor o fuera de plazo]
+  XK1 --> K1
+  KB1 -->|Cancelable| KB2
+  KB2 --> KC1
+  KC1 --> KC2
+  KC2 -->|Aceptado| KB3
+  KC2 -->|Rechazado| KB3
+  KB3 --> KS1
+  KB3 --> K4
+  K4 --> KB4
+```
 
-- Tasa de éxito de timbrado (%), causas de rechazo (top N), latencia PAC.
-- Intentos bloqueados por antifraude, errores por validación de catálogos, duplicados prevenidos.
-- Re-descargas servidas y tiempos de expiración de links.
-- Alertas: certificados por vencer, fallo en actualización de catálogos SAT, incremento anómalo de rechazos.
+Notas
+- Cancelacion aceptada pasa a estatus cancelado
+- Si hubo error de datos del receptor se emite un CFDI sustituto y se relaciona con clave 04
+- El portal publico no expone cancelacion esto se opera en backoffice
