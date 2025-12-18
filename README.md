@@ -12,7 +12,6 @@ git config --local include.path ../.gitconfig
 
 # Opción 2: Configurar manualmente
 git config pull.rebase false  # usa merge al hacer pull
-git config pull.ff only       # solo permite fast-forward
 ```
 
 O para todos tus repositorios:

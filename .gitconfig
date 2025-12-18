@@ -8,7 +8,3 @@
 	# Use merge strategy when pulling (instead of rebase)
 	# This resolves the "fatal: Need to specify how to reconcile divergent branches" error
 	rebase = false
-
-[merge]
-	# Use the default merge strategy
-	ff = false
