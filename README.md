@@ -8,9 +8,10 @@ Para evitar el error "fatal: Need to specify how to reconcile divergent branches
 
 ```bash
 # Opción 1: Usar el archivo de configuración incluido
+# (El path es relativo al directorio .git)
 git config --local include.path ../.gitconfig
 
-# Opción 2: Configurar manualmente
+# Opción 2: Configurar manualmente (recomendado)
 git config pull.rebase false  # usa merge al hacer pull
 ```
 

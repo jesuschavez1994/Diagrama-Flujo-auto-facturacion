@@ -1,6 +1,7 @@
 # Git configuration for this repository
-# To apply this configuration, run:
+# To apply this configuration, run (from repository root):
 #   git config --local include.path ../.gitconfig
+# Note: The path is relative to the .git directory, so ../.gitconfig points to the repository root
 # Or manually set the pull strategy:
 #   git config pull.rebase false
 
