@@ -2,6 +2,24 @@
 
 A continuación se presentan diagramas Mermaid compatibles con GitHub. No hay comillas ni parentesis en labels. Cada subflujo cubre escenarios clave.
 
+## Configuración de Git
+
+Para evitar el error "fatal: Need to specify how to reconcile divergent branches" al hacer pull, configura tu repositorio local:
+
+```bash
+# Opción 1: Usar el archivo de configuración incluido
+# (El path es relativo al directorio .git)
+git config --local include.path ../.gitconfig
+
+# Opción 2: Configurar manualmente (recomendado)
+git config pull.rebase false  # usa merge al hacer pull
+```
+
+O para todos tus repositorios:
+```bash
+git config --global pull.rebase false
+```
+
 ## Flujo principal desde ticket hasta entrega
 
 ```mermaid

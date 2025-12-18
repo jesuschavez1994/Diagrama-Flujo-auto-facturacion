@@ -1,0 +1,11 @@
+# Git configuration for this repository
+# To apply this configuration, run (from repository root):
+#   git config --local include.path ../.gitconfig
+# Note: The path is relative to the .git directory, so ../.gitconfig points to the repository root
+# Or manually set the pull strategy:
+#   git config pull.rebase false
+
+[pull]
+	# Use merge strategy when pulling (instead of rebase)
+	# This resolves the "fatal: Need to specify how to reconcile divergent branches" error
+	rebase = false
